@@ -610,7 +610,7 @@ def decryptBlock(cipherBlock, theWords):
 
 #completeProcess("00112233445566778899AABBCCDDEEFF", "000102030405060708090A0B0C0D0E0F")
 while True:
-    choice = int(input("AES Encryption Program\n1. Encrypt Plaintext using AES\n2. Decrypt Ciphertext using AES\n3. Exit\n"))
+    choice = int(input("AES Encryption Program\n1. Encrypt Plaintext using AES\n2. Decrypt Ciphertext using AES\n3. Exit\nEnter Your Choice: "))
     if choice == 1:
         pt = input("Enter the full plaintext: ")
         key = input("Enter the key (up to 16 letters): ")
