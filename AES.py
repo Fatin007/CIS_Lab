@@ -80,7 +80,11 @@ SBOX = {
     "F8": "41", "F9": "99", "FA": "2D", "FB": "0F",
     "FC": "B0", "FD": "54", "FE": "BB", "FF": "16"
 }
-
+INV_SBOX = {value: key for key, value in SBOX.items()}
+RCon = [
+    "01", "02", "04", "08", "10",
+    "20", "40", "80", "1B", "36"
+]
 
 
 def mapping(sentence):
@@ -117,7 +121,6 @@ def mapping(sentence):
     for letter in sentence:
         res += thedict[letter]
     return res
-RCon = ["01", "02", "04", "08", "10", "20", "40", "80", "1B", "36"]
 
 def makeMatrix(sentence):
     sentence = sentence[:32]
@@ -183,17 +186,36 @@ def subByte(theMatrix):
         res.append(tempList)
 
     return res
+def invSubBytes(theMatrix):
+    return [
+        [INV_SBOX[item] for item in row]
+        for row in theMatrix
+    ]
+def gfMultiply(hexByte, multiplier):
+    a = int(hexByte, 16)
+    b = multiplier
+    result = 0
+
+    while b:
+        if b & 1:
+            result ^= a
+
+        a <<= 1
+
+        if a & 0x100:
+            a ^= 0x11B
+
+        b >>= 1
+
+    return f"{result:02X}"
 
 def byteMul2(hexByte):
     value = int(hexByte, 16)
 
-    # Check the original MSB
     msb_set = value & 0x80
 
-    # Left shift and keep it to 8 bits
     value = (value << 1) & 0xFF
 
-    # AES reduction
     if msb_set:
         value ^= 0x1B
 
@@ -269,7 +291,35 @@ def mixColumns(theMatrix):
         newMatrix[3][col] = f"{b3:02X}"
 
     return newMatrix
+def invMixColumns(theMatrix):
+    inverseCoefficients = [
+        [0x0E, 0x0B, 0x0D, 0x09],
+        [0x09, 0x0E, 0x0B, 0x0D],
+        [0x0D, 0x09, 0x0E, 0x0B],
+        [0x0B, 0x0D, 0x09, 0x0E]
+    ]
 
+    newMatrix = [
+        ["00", "00", "00", "00"],
+        ["00", "00", "00", "00"],
+        ["00", "00", "00", "00"],
+        ["00", "00", "00", "00"]
+    ]
+
+    for col in range(4):
+        column = [theMatrix[row][col] for row in range(4)]
+
+        for row in range(4):
+            result = 0
+
+            for byte, coefficient in zip(
+                column, inverseCoefficients[row]
+            ):
+                result ^= int(gfMultiply(byte, coefficient), 16)
+
+            newMatrix[row][col] = f"{result:02X}"
+
+    return newMatrix
 def shiftRows(theMatrix):
     newMatrix = []
     for index, row in enumerate(theMatrix):
@@ -280,10 +330,31 @@ def shiftRows(theMatrix):
             tempRow[newPos] = item
         newMatrix.append(tempRow)
     return newMatrix
+def invShiftRows(theMatrix):
+    newMatrix = []
+
+    for index, row in enumerate(theMatrix):
+        shift = index
+
+        if shift == 0:
+            newMatrix.append(row[:])
+        else:
+            newMatrix.append(row[-shift:] + row[:-shift])
+
+    return newMatrix
 def displayMatrix(m):
     for item in m:
         print(item)
+def makeRoundKeyMatrix(theWords, roundNumber):
+    start = roundNumber * 4
 
+    return [
+        [
+            theWords[start + col][row]
+            for col in range(4)
+        ]
+        for row in range(4)
+    ]
 
 
 
@@ -353,7 +424,7 @@ def addRoundKey(keyMatrix, State):
     return res
 
 def completeProcess(theSentence, theKey):
-    theSentence = mapping(theSentence)
+    theSentence =  mapping(theSentence)
     print("The mapped Sentence: " + theSentence)
     
     theKey = mapping(theKey)
@@ -424,14 +495,134 @@ def completeProcess(theSentence, theKey):
     print(f"Round 10 After AddRoundKey: ")
     displayMatrix(theState)
 
+    return "".join(
+    theState[row][col]
+    for col in range(4)
+    for row in range(4))
+
+def encryptMessage(message, key):
+    message = message.upper().replace(" ", "")
+    key = key.upper().replace(" ", "")
+
+    key = key[:16].ljust(16, "Z")
+
+    if any(ch < "A" or ch > "Z" for ch in message + key):
+        print("Only letters A-Z are currently supported")
+        return
+
+    if not message:
+        print("Empty Message can't be encrypted")
+        return
+    elif len(message) % 16 != 0:
+        paddingLength = 16 - (len(message) % 16)
+        message += "Z" * paddingLength
+
+    ciphertext = ""
+
+    for start in range(0, len(message), 16):
+        block = message[start:start + 16]
+        ciphertext += completeProcess(block, key)
+
+    return ciphertext
+
+def decryptMessage(ciphertextHex, key):
+    ciphertextHex = "".join(ciphertextHex.split()).upper()
+    key = key.upper().replace(" ", "")[:16].ljust(16, "Z")
+
+    if any(ch < "A" or ch > "Z" for ch in key):
+        raise ValueError("Key must contain letters A-Z only")
+
+    if not ciphertextHex or len(ciphertextHex) % 32 != 0:
+        raise ValueError(
+            "Ciphertext must contain complete 16-byte blocks "
+            "represented by 32 hex characters each"
+        )
+
+    try:
+        bytes.fromhex(ciphertextHex)
+    except ValueError as e:
+        raise ValueError("Ciphertext must be valid hexadecimal") from e
+
+    mappedKey = mapping(key)
+    theKeyMatrix = makeMatrix(mappedKey)
+    theWords = generateRoundKeys(theKeyMatrix)
+
+    plaintextHex = ""
+
+    for start in range(0, len(ciphertextHex), 32):
+        block = ciphertextHex[start:start + 32]
+        plaintextHex += decryptBlock(block, theWords)
+
+    plaintext = ""
+
+    for start in range(0, len(plaintextHex), 2):
+        value = int(plaintextHex[start:start + 2], 16)
+
+        if value > 25:
+            raise ValueError(
+                "Recovered byte is outside the custom A-Z mapping. "
+                "Check the ciphertext and key."
+            )
+
+        plaintext += chr(ord("A") + value)
+
+    return plaintext.rstrip("Z")
+def decryptBlock(cipherBlock, theWords):
+    theState = makeMatrix(cipherBlock)
+
+    keyStateMatrix = makeRoundKeyMatrix(theWords, 10)
+    theState = addRoundKey(keyStateMatrix, theState)
+
+    print("Initial AddRoundKey (Round Key 10):")
+    displayMatrix(theState)
+    for roundNumber in range(9, 0, -1):
+        theState = invShiftRows(theState)
+        print(f"Round {roundNumber} After Inverse Shift Row: ")
+        displayMatrix(theState)
+        print()
+        theState = invSubBytes(theState)
+        print(f"Round {roundNumber} After Inverse Sub Byte: ")
+        displayMatrix(theState)
+        print()
+        keyStateMatrix = makeRoundKeyMatrix(theWords, roundNumber)
+        theState = addRoundKey(keyStateMatrix, theState)
+        print(f"Round {roundNumber} After Add Round Key: ")
+        displayMatrix(theState)
+        print()
+        theState = invMixColumns(theState)
+
+        print(f"After Decryption Round {roundNumber}:")
+        displayMatrix(theState)
+        print()
+
+    theState = invShiftRows(theState)
+    theState = invSubBytes(theState)
+
+    keyStateMatrix = makeRoundKeyMatrix(theWords, 0)
+    theState = addRoundKey(keyStateMatrix, theState)
+
+    return "".join(
+        theState[row][col]
+        for col in range(4)
+        for row in range(4)
+    )
+
+
 #completeProcess("00112233445566778899AABBCCDDEEFF", "000102030405060708090A0B0C0D0E0F")
 while True:
     choice = int(input("AES Encryption Program\n1. Encrypt Plaintext using AES\n2. Decrypt Ciphertext using AES\n3. Exit\n"))
     if choice == 1:
-        pt = processSentence()
-        key = processSentence()
-        completeProcess(pt, key)
+        pt = input("Enter the full plaintext: ")
+        key = input("Enter the key (up to 16 letters): ")
+
+        ciphertext = encryptMessage(pt, key)
+        print("Ciphertext:", ciphertext)
     elif choice == 2:
-        sys.exit()
+        ciphertext = input("Enter ciphertext (hex): ")
+        key = input("Enter the key (up to 16 letters): ")
+
+        plaintext = decryptMessage(ciphertext, key)
+        print("Decrypted plaintext:", plaintext)
+
     else:
         sys.exit()
