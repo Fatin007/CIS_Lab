@@ -185,8 +185,18 @@ def addRoundKey(keyMatrix, State):
     return res
 
 def displayMatrix(m):
-    for item in m:
-        print(item)
+    if not m:
+        print()
+        return
+
+    column_count = len(m[0])
+    cell_width = max(2, max(len(str(value)) for row in m for value in row))
+    separator = "+" + "+".join("-" * (cell_width + 2) for _ in range(column_count)) + "+"
+    print(separator)
+    for row in m:
+        cells = " | ".join(f"{str(value):>{cell_width}}" for value in row)
+        print(f"| {cells} |")
+        print(separator)
     print()
 
 def displayKeyMatrix(m):
@@ -205,93 +215,89 @@ def encryptBlock(plaintext_hex, round_words):
     displayMatrix(state)
     for round_num in range(1, 10):
         state = subByte(state)
-        print(f"Round {round_num}  SubByte:")
+        print(f"Round {round_num} --> SubByte:")
         displayMatrix(state)
         state = shiftRows(state)
-        print(f"Round {round_num}  ShiftRows:")
+        print(f"Round {round_num} --> ShiftRows:")
         displayMatrix(state)
         state = mixColumns(state)
-        print(f"Round {round_num}  MixColumns:")
+        print(f"Round {round_num} --> MixColumns:")
         displayMatrix(state)
         state = addRoundKey(makeRoundKeyMatrix(round_words, round_num), state)
-        print(f"Round {round_num}  AddRoundKey:")
+        print(f"Round {round_num} --> AddRoundKey:")
         displayMatrix(state)
     state = subByte(state)
-    print("Round 10 SubByte:")
+    print("Round 10 --> SubByte:")
     displayMatrix(state)
     state = shiftRows(state)
-    print("Round 10 ShiftRows:")
+    print("Round 10 --> ShiftRows:")
     displayMatrix(state)
     state = addRoundKey(makeRoundKeyMatrix(round_words, 10), state)
-    print("Round 10 AddRoundKey:")
+    print("Round 10 --> AddRoundKey:")
     displayMatrix(state)
     return state
 
 # Single-block AES decryption
 def decryptBlock(ciphertext_hex, round_words):
-    print("Round 10 AddRoundKey (start):")
+    print("Round 10 --> AddRoundKey (start):")
     state = addRoundKey(makeRoundKeyMatrix(round_words, 10), makeMatrix(ciphertext_hex))
     displayMatrix(state)
     for round_num in range(9, 0, -1):
         state = invShiftRows(state)
-        print(f"Round {round_num}  InvShiftRows:")
+        print(f"Round {round_num} --> InvShiftRows:")
         displayMatrix(state)
         state = invSubBytes(state)
-        print(f"Round {round_num}  InvSubBytes:")
+        print(f"Round {round_num} --> InvSubBytes:")
         displayMatrix(state)
         state = addRoundKey(makeRoundKeyMatrix(round_words, round_num), state)
-        print(f"Round {round_num}  AddRoundKey:")
+        print(f"Round {round_num} --> AddRoundKey:")
         displayMatrix(state)
         state = invMixColumns(state)
-        print(f"Round {round_num}  InvMixColumns:")
+        print(f"Round {round_num} --> InvMixColumns:")
         displayMatrix(state)
     state = invShiftRows(state)
-    print("Round 0  InvShiftRows:")
+    print("Round 0 --> InvShiftRows:")
     displayMatrix(state)
     state = invSubBytes(state)
-    print("Round 0  InvSubBytes:")
+    print("Round 0 --> InvSubBytes:")
     displayMatrix(state)
     state = addRoundKey(makeRoundKeyMatrix(round_words, 0), state)
-    print("Round 0  AddRoundKey (end):")
+    print("Round 0 --> AddRoundKey (end):")
     displayMatrix(state)
     return state
 
-# High-level encrypt/decrypt -----------------------------------------------
-BLOCK_SIZE = 16
-ALPHABET_SIZE = 26  # A-Z custom mapping (Z used as padding)
-
 def encryptMessage(message, key):
-    key = (key.upper().replace(" ", "") + "Z" * BLOCK_SIZE)[:BLOCK_SIZE]
+    key = (key.upper().replace(" ", "") + "Z" * 16)[:16]
     message = message.upper().replace(" ", "")
     if not message:
         return ""
-    padded_length = ((len(message) + BLOCK_SIZE - 1) // BLOCK_SIZE) * BLOCK_SIZE
-    message = (message + "Z" * BLOCK_SIZE)[:padded_length]
+    padded_length = ((len(message) + 16 - 1) // 16) * 16
+    message = (message + "Z" * 16)[:padded_length]
     key_matrix = makeMatrix(mapping(key))
     displayKeyMatrix(key_matrix)
     round_words = generateRoundKeys(key_matrix)
     displayKeySchedule(round_words)
     ciphertext = ""
-    for start in range(0, len(message), BLOCK_SIZE):
-        block = encryptBlock(mapping(message[start:start + BLOCK_SIZE]), round_words)
+    for start in range(0, len(message), 16):
+        block = encryptBlock(mapping(message[start:start + 16]), round_words)
         for col in range(4):
             for row in range(4):
                 ciphertext += block[row][col]
     return ciphertext
 
 def decryptMessage(ciphertextHex, key):
-    key = (key.upper().replace(" ", "") + "Z" * BLOCK_SIZE)[:BLOCK_SIZE]
+    key = (key.upper().replace(" ", "") + "Z" * 16)[:16]
     key_matrix = makeMatrix(mapping(key))
     displayKeyMatrix(key_matrix)
     round_words = generateRoundKeys(key_matrix)
     displayKeySchedule(round_words)
     pt = ""
-    for start in range(0, len(ciphertextHex), BLOCK_SIZE * 2):
-        block = decryptBlock(ciphertextHex[start:start + BLOCK_SIZE * 2], round_words)
+    for start in range(0, len(ciphertextHex), 16 * 2):
+        block = decryptBlock(ciphertextHex[start:start + 16 * 2], round_words)
         for col in range(4):
             for row in range(4):
                 v = int(block[row][col], 16)
-                if v >= ALPHABET_SIZE:
+                if v >= 26:
                     return pt.rstrip("Z")
                 pt += chr(v + 65)
     return pt.rstrip("Z")
